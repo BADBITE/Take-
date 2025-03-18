@@ -1,136 +1,110 @@
-import os
-import random
-import requests
-import asyncio
-from playwright.async_api import Playwright, async_playwright
-from colorama import Fore, Style, init
+from playwright.sync_api import sync_playwright
+import time
 
-# Initialize the colorama library
-init(autoreset=True)
+# Read tokens from auth.txt
+def load_tokens():
+    with open("tokens.txt", "r") as file:
+        return [line.strip() for line in file.readlines() if line.strip()]
 
-def read_file_to_list(filename):
-    """Read the content from a text file and return it as a list."""
-    with open(filename, 'r') as file:
-        return [line.strip().strip('"') for line in file if line.strip()]  # Remove quotes
-
-# Read tokens and user agents from files
-tokens = read_file_to_list('tokens.txt')
-user_agents = read_file_to_list('user_agents.txt')
-
-def print_futuristic_banner():
-    print(Fore.CYAN + "🚀 Welcome to the Futuristic Bot! 🚀" + Style.RESET_ALL)
-
-def print_token_divider(number):
-    print(f"\n{Fore.BLUE}{Style.BRIGHT}♫ {'Token'.ljust(15)} [{Fore.GREEN}#{number}{Fore.BLUE}] {'♫'.rjust(35)}")
-
-async def run(playwright, user_agent, token, token_number, headless):
-    browser = await playwright.chromium.launch(headless=headless)
-    context = await browser.new_context(
-        viewport={"width": 375, "height": 667},
-        has_touch=True,
-        is_mobile=True,
-    )
-
+# Function to get coin balance
+def get_coin_balance(page):
     try:
-        page = await context.new_page()
-        await page.goto(
-            f"https://telegram.geagle.online/wallet/?auth={token}",
-            timeout=60000,
-            wait_until="networkidle"
-        )
-        await page.wait_for_timeout(3000)
-        await page.goto("https://telegram.geagle.online/", wait_until="domcontentloaded")
+        balance_text = page.text_content("span._amount_1wzqv_81")
+        balance = int(balance_text.replace(",", ""))
+        print(f"[💰] Coin Balance: {balance}")
+        return balance
+    except:
+        print("[❌] Failed to fetch coin balance.")
+        return 0
 
-        await page.locator("._button_gp2y8_39 > svg > path").first.click(
-            timeout=20000,
-            delay=random.randint(200, 800)
-        )
-        await page.wait_for_timeout(3000)
+# Function to get remaining taps
+def get_remaining_taps(page):
+    try:
+        energy_bar = page.query_selector("div._progress_15n79_16")
+        if energy_bar:
+            style_attr = energy_bar.get_attribute("style")
+            if "width" in style_attr:
+                energy_percent = float(style_attr.split("width: ")[1].split("%")[0])
+                remaining_taps = int((energy_percent / 100) * 1000)  # Convert percent to taps (total 1000 taps)
+                return remaining_taps
+    except:
+        print("[❌] Failed to fetch remaining taps.")
+    return 0  # If it fails, return 0 to prevent infinite clicking
 
-        total_clicks = 0
+# Function to automate tapping
+def auto_tap(page):
+    tap_area_selector = "div._tapArea_njdmz_15"
+    print("[🎯] Starting tapping at 25 taps per second...")
+    
+    while True:
+        remaining_taps = get_remaining_taps(page)
+        if remaining_taps < 200:  # Stop if remaining taps are below 200
+            print("[⚠️] Remaining taps below 200! Stopping taps.")
+            break
 
-        while total_clicks < 500:
-            clicks = [(random.randint(40, 320), random.randint(333, 530)) for _ in range(3)]
-
-            for x, y in clicks:
-                await page.mouse.click(x, y, click_count=2)
-                total_clicks += 1
-
-            if total_clicks >= 500:
+        start_time = time.time()
+        click_count = 0
+        
+        while time.time() - start_time < 1:  # Clicks per second
+            page.click(tap_area_selector)
+            click_count += 1
+            if click_count >= 25:
                 break
 
-            if total_clicks % 100 == 0 and total_clicks > 0:
-                wait_time = random.randint(2000, 3000)
-                print(f"Waiting for {wait_time / 1000} seconds...")
-                await page.wait_for_timeout(wait_time)
+# Function to process one token at a time
+def process_token(token):
+    with sync_playwright() as p:
+        print("[🚀] Launching Chromium...")
 
-        print(f"Successfully reached {total_clicks} clicks!")
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-extensions"]
+        )  
+        context = browser.new_context()
+        page = context.new_page()
 
-        for i in range(3):
-            headers = {
-                'authority': 'gold-eagle-api.fly.dev',
-                'accept': 'application/json, text/plain, */*',
-                'accept-language': 'en-US;q=0.8,en;q=0.7',
-                'authorization': f'Bearer {token}',
-                'origin': 'https://telegram.geagle.online',
-                'referer': 'https://telegram.geagle.online/',
-                'sec-ch-ua': '"Not-A.Brand";v="99", "Chromium";v="124"',
-                'sec-ch-ua-mobile': '?1',
-                'sec-ch-ua-platform': '"Android"',
-                'sec-fetch-dest': 'empty',
-                'sec-fetch-mode': 'cors',
-                'sec-fetch-site': 'cross-site',
-                'user-agent': user_agent,
-            }
+        # Open the game website
+        url = "https://telegram.geagle.online"
+        page.goto(url)
+        print("[✅] Website loaded!")
 
-            response = requests.get('https://gold-eagle-api.fly.dev/user/me/progress', headers=headers)
+        # Inject token into local storage as session_token (masked for security)
+        masked_token = token[:4] + "..." + token[-4:]  # Show only first and last 4 characters
+        page.evaluate(f"localStorage.setItem('session_token', '{token}');")
+        print(f"[🔑] Token injected as session_token: {masked_token}")
 
-            if response.status_code == 200:
-                cleaned_data = response.json()
-                cleaned_data.pop('max_energy', None)
-                cleaned_data.pop('not_registered_events_count', None)
+        # Reload the page to apply authentication
+        page.reload()
+        print("[🔄] Page reloaded with token!")
 
-                print(f"\n⚡️ Request #{i+1} Status: SUCCESS ✅")
-                print(f"»» TOKEN #{token_number} ««")
-                print(f"🆔 ID: {cleaned_data.get('id', '')}")
-                print(f"🔋 Energy: {cleaned_data.get('energy', 0)}")
-                print(f"🚀 XP: {cleaned_data.get('experience', 0)}")
-                print("────────────────────────────────────────────────────")
-            else:
-                print(f"\n🔥 Request #{i+1} Status: FAILED 🚨")
-                print(f"📛 Error Code: {response.status_code}")
+        # Fetch Coin Balance
+        get_coin_balance(page)
 
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    finally:
-        await context.close()
-        await browser.close()
+        # Perform tapping while remaining taps > 200
+        auto_tap(page)
 
-async def run_with_sem(sem, user_agent, token, token_number, headless):
-    async with sem:
-        async with async_playwright() as playwright:
-            await run(playwright, user_agent, token, token_number, headless)
+        # Refresh the browser before closing
+        page.reload()
+        print("[🔄] Page refreshed before closing!")
 
-async def main():
-    print_futuristic_banner()
-    headless_input = input("Would you like to run the browser in headless mode? (yes/no): ").strip().lower()
-    headless = headless_input in ['yes']
+        # Close browser
+        browser.close()
+        print("[🚪] Browser closed!\n")
 
-    token_counter = 1
-    sem = asyncio.Semaphore(1)  # Set the number of concurrent operations (4 here)
+# Main function to run for all tokens
+def main():
+    while True:  # Infinite loop
+        tokens = load_tokens()
+        if not tokens:
+            print("[❌] No tokens found in auth.txt! Exiting.")
+            break
 
-    while True:
-        tasks = []
-        for idx, token in enumerate(tokens):
-            print_token_divider(token_counter)
-            user_agent = user_agents[idx % len(user_agents)]
-            tasks.append(run_with_sem(sem, user_agent, token, token_counter, headless))
-            token_counter += 1
+        for token in tokens:
+            process_token(token)  # Process each token
 
-        await asyncio.gather(*tasks)  # Run all tasks concurrently
+        print("[⏳] Resting for 1 minute before next cycle...")
+        time.sleep(60)  # Wait 1 minute before restarting the cycle
 
-        print("🌀 System Recharging... (Next cycle in 5 minutes) ⏳")
-        await asyncio.sleep(10)  # Wait for 5 minutes
-
-if __name__ == "__main__":
-    asyncio.run(main())
+# Run the script
+if name == "main":
+    main()
