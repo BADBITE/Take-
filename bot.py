@@ -117,7 +117,7 @@ async def main():
     headless = headless_input in ['yes']
 
     token_counter = 1
-    sem = asyncio.Semaphore(1)  # Set the number of concurrent operations (4 here)
+    sem = asyncio.Semaphore(3)  # Set the number of concurrent operations (4 here)
 
     while True:
         tasks = []
